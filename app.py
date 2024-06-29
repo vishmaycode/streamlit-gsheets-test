@@ -28,6 +28,15 @@ def fetch_google_sheet_data():
 
     return data
 
+# Function to add a row to Google Sheets
+def add_row_to_google_sheet(new_row):
+    sheet_url = GSHEET_URL
+    sheet = client.open_by_url(sheet_url)
+    worksheet = sheet.get_worksheet(0)  # Assuming you want the first sheet
+
+    # Append the new row to the bottom of the sheet
+    worksheet.append_row(new_row)
+
 # Main Streamlit app code
 def main():
     st.title('Google Sheets Data Viewer')
@@ -42,6 +51,21 @@ def main():
         # Display data in a table
         st.write("### Google Sheet Data")
         st.table(data)
+
+
+    # Section to add a new row
+    st.header("Add a New Row")
+
+    # Create input fields for the new row data
+    new_row = {}
+    new_row['Column1'] = st.text_input("Column 1")
+    new_row['Column2'] = st.text_input("Column 2")
+    new_row['Column3'] = st.text_input("Column 3")
+
+    # Button to add the new row
+    if st.button('Add New Row'):
+        add_row_to_google_sheet(list(new_row.values()))
+        st.success("New row added successfully!")
 
 # Run the app
 if __name__ == '__main__':
