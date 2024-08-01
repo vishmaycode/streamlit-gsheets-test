@@ -3,6 +3,7 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
+from googleapiclient.discovery import build
 
 load_dotenv()
 GSHEET_URL = os.environ.get("GSHEET_URL")
@@ -13,42 +14,102 @@ creds = Credentials.from_service_account_file(
     scopes=['https://www.googleapis.com/auth/spreadsheets']
 )
 
-# Initialize the Google Sheets API client
+# Initialize Google Sheets API clients
 client = gspread.authorize(creds)
+service = build('sheets', 'v4', credentials=creds)
 
-# Function to fetch and display data from Google Sheets
-# def fetch_google_sheet_data():
-#     sheet_url = GSHEET_URL
-#     sheet = client.open_by_url(sheet_url)
-#     worksheet = sheet.get_worksheet(0)  # Assuming you want the first sheet
+# Function to create or get a worksheet
+def get_or_create_worksheet(sheet, worksheet_name):
+    newly_created = False
+    try:
+        worksheet = sheet.worksheet(worksheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = sheet.add_worksheet(title=worksheet_name, rows="100", cols="20")
+        headers = ["Serial Number", "Name", "State ID Number", "Mobile Number", "Gender", "Training Centre", "Category", "Seed"]
+        add_headers(worksheet, headers)
+        newly_created = True
 
-#     # Fetch data from sheet
-#     data = worksheet.get_all_records()
+        # Apply bold formatting to headers
+        # Get the sheet ID from Google Sheets API
+        spreadsheet_id = sheet.id
+        sheet_id = next(
+            sheet['properties']['sheetId'] for sheet in service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()['sheets']
+            if sheet['properties']['title'] == worksheet_name
+        )
+        apply_bold_formatting(spreadsheet_id, sheet_id, headers)
+    
+    return worksheet, newly_created
 
-#     return data
+def add_headers(worksheet, headers):
+    worksheet.append_row(headers)
+
+def apply_bold_formatting(spreadsheet_id, sheet_id, headers):
+    start_col = 0
+    end_col = len(headers)
+    range_ = f"{sheet_id}!A1:{chr(65 + end_col - 1)}1"
+    
+    requests = [{
+        "repeatCell": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 0,
+                "endRowIndex": 1,
+                "startColumnIndex": start_col,
+                "endColumnIndex": end_col
+            },
+            "cell": {
+                "userEnteredFormat": {
+                    "textFormat": {
+                        "bold": True
+                    }
+                }
+            },
+            "fields": "userEnteredFormat.textFormat.bold"
+        }
+    }]
+    
+    body = {
+        'requests': requests
+    }
+    
+    service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
 
 # Function to add a row to Google Sheets
-def add_row_to_google_sheet(new_row, worksheet_name):
-    sheet_url = GSHEET_URL
-    sheet = client.open_by_url(sheet_url)
-    worksheet = sheet.worksheet(worksheet_name)
-
-    # Append the new row to the bottom of the sheet
+def add_row_to_google_sheet(new_row, worksheet):
     worksheet.append_row(new_row)
+
+# Function to validate mobile number
+def validate_mobile_number(mobile_number):
+    return len(mobile_number) == 10 and mobile_number.isdigit()
+
+# Function to validate State ID Number
+def validate_state_id_number(state_id_number):
+    return state_id_number.isdigit()
 
 # Main Streamlit app code
 def main():
     st.title('Test Badminton Form')
 
-    # # Section to add a new row
-    # st.header("Add a New Row")
-
     # Create input fields for the new row data
     new_row = {}
-    new_row['Player Name'] = st.text_input("Player Name:")
-    new_row['State ID Number'] = st.text_input("State ID Number:")
-    new_row['Mobile Number'] = st.text_input("Mobile Number:")
+    new_row['Player Name'] = st.text_input("Player Name:", placeholder="Type your name...")
+    new_row['State ID Number'] = st.text_input("State ID Number:", placeholder="Type a number...")
+    
+    # Validate the State ID Number
+    if new_row['State ID Number'] and not validate_state_id_number(new_row['State ID Number']):
+        st.error("Please enter a valid State ID Number.")
+
+    new_row['Mobile Number'] = st.text_input("Mobile Number:", placeholder="Type your mobile number...")
+    
+    # Validate the mobile number
+    if new_row['Mobile Number'] and not validate_mobile_number(new_row['Mobile Number']):
+        st.error("Please enter a valid 10-digit mobile number.")
+
     new_row['Gender'] = st.radio("Gender:", ["Male", "Female"])
+    new_row['Category'] = st.selectbox("Category:", [
+        "", "U 9", "U 11", "U 13",
+        "U 15", "U 17", "U 19",
+        "Open"])
     new_row['Training Centre'] = st.selectbox("Training Centre:", [
         "", "RCC Panjim", "RCC Mapusa", "Khelo India Centre Campal",
         "Salvador De Mundo", "Chicalim", "Don Boasco Oratory",
@@ -57,201 +118,140 @@ def main():
 
     st.write("Categories Participating in:")
     if new_row['Gender']:
-       new_row['Singles'] = st.checkbox("Singles")
-       new_row['Doubles'] = st.checkbox("Doubles")
-       new_row['Mixed Doubles'] = st.checkbox("Mixed Doubles")
-   
-       new_row['Singles'] = "Singles" if new_row['Singles'] else "-"
-       new_row['Doubles'] = "Doubles" if new_row['Doubles'] else "-"
-       new_row['Mixed Doubles'] = "Mixed Doubles" if new_row['Mixed Doubles'] else "-"
+        new_row['Singles'] = st.checkbox("Singles")
+        new_row['Doubles'] = st.checkbox("Doubles")
+        new_row['Mixed Doubles'] = st.checkbox("Mixed Doubles")
+
+        new_row['Singles'] = "Singles" if new_row['Singles'] else "-"
+        new_row['Doubles'] = "Doubles" if new_row['Doubles'] else "-"
+        new_row['Mixed Doubles'] = "Mixed Doubles" if new_row['Mixed Doubles'] else "-"
 
     if new_row['Doubles'] == "Doubles":
         new_row['Doubles Partner'] = st.text_input("Name of Doubles Partner:")
         new_row['State ID Number of Doubles'] = st.text_input("State ID of Doubles Partner:")
+        if new_row['State ID Number of Doubles'] and not validate_state_id_number(str(new_row['State ID Number of Doubles'])):
+            st.error("Please enter a valid State ID Number for Doubles Partner.")
     else:
         new_row['Doubles Partner'] = "-"
         new_row['State ID Number of Doubles'] = "-"
-    
+
     if new_row['Mixed Doubles'] == "Mixed Doubles":
         new_row['Mixed Doubles Partner'] = st.text_input("Name of Mixed Doubles Partner:")
         new_row['State ID Number of Mixed Doubles'] = st.text_input("State ID Number of Mixed Doubles")
-        # # Set default gender for mixed doubles partner
-        # default_partner_gender = "Male" if new_row['Gender'] == "Female" else "Female"
-        # new_row['Mixed Doubles Partner'] = st.text_input("Name of Mixed Doubles Partner:")
-        # new_row['State ID Number of Mixed Doubles'] = st.text_input(
-        #     f"State ID of Mixed Doubles Partner ({default_partner_gender}):"
-        # )
+        if new_row['State ID Number of Mixed Doubles'] and not validate_state_id_number(str(new_row['State ID Number of Mixed Doubles'])):
+            st.error("Please enter a valid State ID Number for Mixed Doubles Partner.")
     else:
         new_row['Mixed Doubles Partner'] = "-"
         new_row['State ID Number of Mixed Doubles'] = "-"
 
-        # Button to add the new row
+    # Button to add the new row
     if st.button('Submit'):
-            # Check if mandatory fields are filled
-        if not new_row['Player Name'] or not new_row['State ID Number'] or not new_row['Mobile Number'] or not new_row['Gender']:
+        # Check if mandatory fields are filled
+        if not new_row['Player Name'] or not new_row['State ID Number'] or not new_row['Mobile Number'] or not new_row['Gender'] or not new_row['Category'] or not new_row['Training Centre']:
             st.error("Please fill in all the mandatory fields.")
+        elif not validate_mobile_number(new_row['Mobile Number']):
+            st.error("Please enter a valid 10-digit mobile number.")
+        elif not validate_state_id_number(new_row['State ID Number']):
+            st.error("Please enter a valid State ID Number.")
+        elif new_row['Doubles'] == "Doubles" and (not validate_state_id_number(str(new_row['State ID Number of Doubles']))):
+            st.error("Please enter a valid State ID Number for Doubles Partner.")
+        elif new_row['Mixed Doubles'] == "Mixed Doubles" and (not validate_state_id_number(str(new_row['State ID Number of Mixed Doubles']))):
+            st.error("Please enter a valid State ID Number for Mixed Doubles Partner.")
         else:
-                # Prepare data for submission
-            if new_row['Gender'] == "Male":
-                if new_row['Singles']:
-                    Singles_row = [
-                        new_row['Player Name'],
-                        new_row['State ID Number'],
-                        new_row['Mobile Number'],
-                        new_row['Gender'],
-                        new_row['Training Centre'],
-                        new_row['Singles']
-                    ]
-                    add_row_to_google_sheet(Singles_row, 'Sheet1')
-
-                # Add doubles partners to their respective sheets if applicable
-                # Split the main data into two parts
-                if new_row['Doubles'] == "Doubles":
-                    first_half_row = [
-                        new_row['Player Name'],
-                        new_row['State ID Number'],
-                        new_row['Mobile Number'],
-                        new_row['Gender'],
-                        new_row['Training Centre'],
-                        new_row['Doubles']
-                    ]
-                    second_half_row = [
-                        new_row['Doubles Partner'],
-                        new_row['State ID Number of Doubles'],
-                        "",
-                        new_row['Gender'],
-                        new_row['Training Centre'],
-                        new_row['Doubles']
-                    ]
-                # Add to the doubles sheet
-                    add_row_to_google_sheet(first_half_row, 'Sheet2')
-                    add_row_to_google_sheet(second_half_row, 'Sheet2')
+            # Prepare data for submission
+            category = new_row['Category']
+            gender_mapping = {"Male": "Boys", "Female": "Girls"}
+            gender = gender_mapping.get(new_row['Gender'], new_row['Gender'])
             
-                # Add mixed doubles partners to their respective sheets if applicable
-                # Split the main data into two parts
-                if new_row['Mixed Doubles'] == "Mixed Doubles":
-                    first_half_row = [
-                        new_row['Player Name'],
-                        new_row['State ID Number'],
-                        new_row['Mobile Number'],
-                        new_row['Gender'],
-                        new_row['Training Centre'],
-                        new_row['Mixed Doubles']
-                    ]
-                    second_half_row = [
-                        new_row['Mixed Doubles Partner'],
-                        new_row['State ID Number of Mixed Doubles'],
-                        "",
-                        "Female",
-                        new_row['Training Centre'],
-                        new_row['Mixed Doubles']
-                    ]
-                # Add to the mixed doubles sheet
-                    add_row_to_google_sheet(first_half_row, 'Sheet3')
-                    add_row_to_google_sheet(second_half_row, 'Sheet3')
+            sheet_url = GSHEET_URL
+            sheet = client.open_by_url(sheet_url)
 
-            elif new_row['Gender'] == "Female":
-                if new_row['Singles']:
-                    Singles_row = [
-                        new_row['Player Name'],
-                        new_row['State ID Number'],
-                        new_row['Mobile Number'],
-                        new_row['Gender'],
-                        new_row['Training Centre'],
-                        new_row['Singles']
-                    ]
-                    add_row_to_google_sheet(Singles_row, 'Sheet4')
+            # Determine the new serial number
+            def get_last_serial_number(worksheet, newly_created):
+                if newly_created:
+                    return 0
+                records = worksheet.get_all_records()
+                return int(records[-1]["Serial Number"]) if records else 0
 
-                 # Add doubles partners to their respective sheets if applicable
-                # Split the main data into two parts
-                if new_row['Doubles'] == "Doubles":
-                    first_half_row = [
-                        new_row['Player Name'],
-                        new_row['State ID Number'],
-                        new_row['Mobile Number'],
-                        new_row['Gender'],
-                        new_row['Training Centre'],
-                        new_row['Doubles']
-                    ]
-                    second_half_row = [
-                        new_row['Doubles Partner'],
-                        new_row['State ID Number of Doubles'],
-                        "",
-                        new_row['Gender'],
-                        new_row['Training Centre'],
-                        new_row['Doubles']
-                    ]
-                # Add to the doubles sheet
-                    add_row_to_google_sheet(first_half_row, 'Sheet5')
-                    add_row_to_google_sheet(second_half_row, 'Sheet5')
-            
-                # Add mixed doubles partners to their respective sheets if applicable
-                # Split the main data into two parts
-                if new_row['Mixed Doubles'] == "Mixed Doubles":
-                    first_half_row = [
-                        new_row['Player Name'],
-                        new_row['State ID Number'],
-                        new_row['Mobile Number'],
-                        new_row['Gender'],
-                        new_row['Training Centre'],
-                        new_row['Mixed Doubles']
-                    ]
-                    second_half_row = [
-                        new_row['Mixed Doubles Partner'],
-                        new_row['State ID Number of Mixed Doubles'],
-                        "",
-                        "Male",
-                        new_row['Training Centre'],
-                        new_row['Mixed Doubles']
-                    ]
-                # Add to the mixed doubles sheet                  
-                    add_row_to_google_sheet(second_half_row, 'Sheet3')
-                    add_row_to_google_sheet(first_half_row, 'Sheet3')
+            new_serial_number_singles = new_serial_number_doubles = new_serial_number_mixed_doubles = 0
 
-                 
+            # For Singles
+            if new_row['Singles'] == "Singles":
+                worksheet_singles, new_singles_created = get_or_create_worksheet(sheet, f"{category} {gender} Singles")
+                last_serial_number_singles = get_last_serial_number(worksheet_singles, new_singles_created)
+                new_serial_number_singles = last_serial_number_singles + 1
+                Singles_row = [
+                    new_serial_number_singles,
+                    new_row['Player Name'],
+                    new_row['State ID Number'],
+                    new_row['Mobile Number'],
+                    new_row['Gender'],
+                    new_row['Training Centre'],
+                    new_row['Singles']
+                ]
+                add_row_to_google_sheet(Singles_row, worksheet_singles)
+
+            # For Doubles
+            if new_row['Doubles'] == "Doubles":
+                worksheet_doubles, new_doubles_created = get_or_create_worksheet(sheet, f"{category} {gender} Doubles")
+                last_serial_number_doubles = get_last_serial_number(worksheet_doubles, new_doubles_created)
+                new_serial_number_doubles = last_serial_number_doubles + 1
+                first_half_row = [
+                    new_serial_number_doubles,
+                    new_row['Player Name'],
+                    new_row['State ID Number'],
+                    new_row['Mobile Number'],
+                    new_row['Gender'],
+                    new_row['Training Centre'],
+                    new_row['Doubles']
+                ]
+                second_half_row = [
+                    new_serial_number_doubles,
+                    new_row['Doubles Partner'],
+                    new_row['State ID Number of Doubles'],
+                    "",
+                    new_row['Gender'],
+                    new_row['Training Centre'],
+                    new_row['Doubles']
+                ]
+                add_row_to_google_sheet(first_half_row, worksheet_doubles)
+                add_row_to_google_sheet(second_half_row, worksheet_doubles)
+
+            # For Mixed Doubles
+            if new_row['Mixed Doubles'] == "Mixed Doubles":
+                worksheet_mixed_doubles, new_mixed_doubles_created = get_or_create_worksheet(sheet, f"{category} Mixed Doubles")
+                last_serial_number_mixed_doubles = get_last_serial_number(worksheet_mixed_doubles, new_mixed_doubles_created)
+                new_serial_number_mixed_doubles = last_serial_number_mixed_doubles + 1
+
+                first_half_row = [
+                    new_serial_number_mixed_doubles,
+                    new_row['Player Name'],
+                    new_row['State ID Number'],
+                    new_row['Mobile Number'],
+                    new_row['Gender'],
+                    new_row['Training Centre'],
+                    new_row['Mixed Doubles']
+                ]
+                second_half_row = [
+                    new_serial_number_mixed_doubles,
+                    new_row['Mixed Doubles Partner'],
+                    new_row['State ID Number of Mixed Doubles'],
+                    "",
+                    "Female" if gender == "Boys" else "Male",
+                    new_row['Training Centre'],
+                    new_row['Mixed Doubles']
+                ]
+
+                # Ensure female row comes after male row
+                if first_half_row[4] == "Female":
+                    first_half_row, second_half_row = second_half_row, first_half_row
+
+                add_row_to_google_sheet(first_half_row, worksheet_mixed_doubles)
+                add_row_to_google_sheet(second_half_row, worksheet_mixed_doubles)
+
             st.success("Submitted Successfully!")
-
-#    # Button to add the new row
-#     if st.button('Submit'):
-#         # Check if mandatory fields are filled
-#         if not new_row['Player Name'] or not new_row['State ID Number'] or not new_row['Mobile Number'] or not new_row['Gender']:
-#             st.error("Please fill in all the mandatory fields.")
-#         else:
-#             # Add to the main sheet
-#             main_row = [
-#                 new_row['Player Name'],
-#                 new_row['State ID Number'],
-#                 new_row['Mobile Number'],
-#                 new_row['Gender'],
-#                 new_row['Training Centre'],
-#                 new_row['Singles']
-#                 # new_row['Doubles'],
-#                 # new_row['Mixed Doubles'],
-#                 # new_row['Doubles Partner'],
-#                 # new_row['State ID Number of Doubles'],
-#                 # new_row['Mixed Doubles Partner'],
-#                 # new_row['State ID Number of Mixed Doubles']
-#             ]
-#             add_row_to_google_sheet(main_row, 'Sheet1')
-
-#             # Add doubles and mixed doubles partners to their respective sheets if applicable
-#             if new_row['Doubles'] == "Doubles":
-#                 doubles_row = [
-#                     # new_row['Player Name'],
-#                     new_row['Doubles Partner'],
-#                     new_row['State ID Number of Doubles']
-#             ]
-#             add_row_to_google_sheet(doubles_row, 'Sheet2')
-
-#             if new_row['Mixed Doubles'] == "Mixed Doubles":
-#                 mixed_doubles_row = [
-#                     new_row['Player Name'],
-#                     new_row['Mixed Doubles Partner'],
-#                     new_row['State ID Number of Mixed Doubles']
-#                 ]
-#                 add_row_to_google_sheet(mixed_doubles_row, 'Sheet3')
-
-#             st.success("Submitted Successfully!")
+            # Rerun the main function to clear the form
+            st.experimental_rerun()
 
 # Run the app
 if __name__ == '__main__':
