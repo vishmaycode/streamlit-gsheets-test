@@ -1,9 +1,14 @@
-# Demo streamlit app using google sheets
+# Streamlit app using Google Sheets
+
+### Demo app to show integration of streamlit and google sheets for forms
 
 #### Requirements
 
 python 3.10
-package requirements listed in requirements.txt file
+
+```shell
+pip install requirements.txt
+```
 
 #### Secrets file in .streamlit/secrets.toml
 
